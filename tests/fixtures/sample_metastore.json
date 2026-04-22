@@ -1,0 +1,177 @@
+[
+  {
+    "accessLevel": "public",
+    "landingPage": "https:\\/\\/data.cms.gov\\/provider-data\\/dataset\\/48nr-hqxx",
+    "bureauCode": [
+      "009:38"
+    ],
+    "issued": "2023-07-05",
+    "@type": "dcat:Dataset",
+    "modified": "2026-01-26",
+    "released": "2026-02-25",
+    "keyword": [
+      "Ambulatory Surgical Center",
+      "Outpatient",
+      "Survey",
+      "CAHPS",
+      "Surgery",
+      "Outpatient Surgery"
+    ],
+    "contactPoint": {
+      "@type": "vcard:Contact",
+      "fn": "Hospital Compare",
+      "hasURL": "https:\\/\\/cmsqualitysupport.servicenowservices.com\\/qnet_qa"
+    },
+    "publisher": {
+      "@type": "org:Organization",
+      "name": "Centers for Medicare \\u0026 Medicaid Services (CMS)"
+    },
+    "identifier": "48nr-hqxx",
+    "description": "A list of ambulatory surgical center ratings for the Outpatient and Ambulatory Surgery Consumer Assessment of Healthcare Providers and Systems (OAS CAHPS) survey. The OAS CAHPS survey collects information about patients\\u0027 experiences of care in hospital outpatient departments (HOPDs) and ambulatory surgical centers (ASCs). The data are updated and reported each quarter with data from the most recently completed quarter replacing the oldest quarter of data.",
+    "title": "Outpatient and Ambulatory Surgery Consumer Assessment of Healthcare Providers and Systems (OAS CAHPS) survey for ambulatory surgical centers - Facility",
+    "programCode": [
+      "009:000"
+    ],
+    "distribution": [
+      {
+        "@type": "dcat:Distribution",
+        "downloadURL": "https:\\/\\/data.cms.gov\\/provider-data\\/sites\\/default\\/files\\/resources\\/8392b7d74209bb3dc54ff1b09635e733_1770163550\\/ASCQR_OAS_CAHPS_BY_ASC.csv",
+        "mediaType": "text\\/csv",
+        "describedBy": "https:\\/\\/data.cms.gov\\/provider-data\\/sites\\/default\\/files\\/data_dictionaries\\/hospital\\/HOSPITAL_Data_Dictionary.pdf",
+        "describedByType": "application\\/pdf"
+      }
+    ],
+    "theme": [
+      "Hospitals"
+    ]
+  },
+  {
+    "accessLevel": "public",
+    "landingPage": "https:\\/\\/data.cms.gov\\/provider-data\\/dataset\\/4jcv-atw7",
+    "bureauCode": [
+      "009:38"
+    ],
+    "issued": "2025-10-01",
+    "@type": "dcat:Dataset",
+    "modified": "2025-12-16",
+    "released": "2026-02-25",
+    "keyword": [
+      "Ambulatory Surgical Center",
+      "Colonoscopy"
+    ],
+    "contactPoint": {
+      "@type": "vcard:Contact",
+      "fn": "Hospital Compare",
+      "hasURL": "https:\\/\\/cmsqualitysupport.servicenowservices.com\\/qnet_qa"
+    },
+    "publisher": {
+      "@type": "org:Organization",
+      "name": "Centers for Medicare \\u0026 Medicaid Services (CMS)"
+    },
+    "identifier": "4jcv-atw7",
+    "description": "A list of ambulatory surgical centers participating in the Ambulatory Surgical Center Quality Reporting (ASCQR) Program and their performance rates.",
+    "title": "Ambulatory Surgical Center Quality Measures - Facility",
+    "programCode": [
+      "009:000"
+    ],
+    "distribution": [
+      {
+        "@type": "dcat:Distribution",
+        "downloadURL": "https:\\/\\/data.cms.gov\\/provider-data\\/sites\\/default\\/files\\/resources\\/dd03994fc93e296bb0297f1cd43cc987_1770163552\\/ASC_Facility.csv",
+        "mediaType": "text\\/csv",
+        "describedBy": "https:\\/\\/data.cms.gov\\/provider-data\\/sites\\/default\\/files\\/data_dictionaries\\/hospital\\/HOSPITAL_Data_Dictionary.pdf",
+        "describedByType": "application\\/pdf"
+      }
+    ],
+    "theme": [
+      "Hospitals"
+    ]
+  },
+  {
+    "accessLevel": "public",
+    "landingPage": "https:\\/\\/data.cms.gov\\/provider-data\\/dataset\\/wue8-3vwe",
+    "bureauCode": [
+      "009:38"
+    ],
+    "issued": "2025-10-01",
+    "@type": "dcat:Dataset",
+    "modified": "2025-12-16",
+    "released": "2026-02-25",
+    "keyword": [
+      "Ambulatory Surgical Center",
+      "National",
+      "Surgery",
+      "Colonoscopy"
+    ],
+    "contactPoint": {
+      "@type": "vcard:Contact",
+      "fn": "Hospital Compare",
+      "hasURL": "https:\\/\\/cmsqualitysupport.servicenowservices.com\\/qnet_qa"
+    },
+    "publisher": {
+      "@type": "org:Organization",
+      "name": "Centers for Medicare \\u0026 Medicaid Services (CMS)"
+    },
+    "identifier": "wue8-3vwe",
+    "description": "This file contains the national averages for all measures reported through the Ambulatory Surgical Center Quality Reporting (ASCQR) Program.",
+    "title": "Ambulatory Surgical Center Quality Measures - National",
+    "programCode": [
+      "009:000"
+    ],
+    "distribution": [
+      {
+        "@type": "dcat:Distribution",
+        "downloadURL": "https:\\/\\/data.cms.gov\\/provider-data\\/sites\\/default\\/files\\/resources\\/43dcc3212bfab34ac186ac2e19196b09_1770163554\\/ASC_National.csv",
+        "mediaType": "text\\/csv",
+        "describedBy": "https:\\/\\/data.cms.gov\\/provider-data\\/sites\\/default\\/files\\/data_dictionaries\\/hospital\\/HOSPITAL_Data_Dictionary.pdf",
+        "describedByType": "application\\/pdf"
+      }
+    ],
+    "theme": [
+      "Hospitals"
+    ]
+  },
+  {
+    "accessLevel": "public",
+    "landingPage": "https:\\/\\/data.cms.gov\\/provider-data\\/dataset\\/23ew-n7w9",
+    "bureauCode": [
+      "009:38"
+    ],
+    "issued": "2020-03-14",
+    "@type": "dcat:Dataset",
+    "modified": "2025-12-18",
+    "released": "2026-01-21",
+    "nextUpdateDate": "2026-04-22",
+    "keyword": [
+      "Quality",
+      "Quality Measures"
+    ],
+    "contactPoint": {
+      "@type": "vcard:Contact",
+      "fn": "Dialysis Facility Helpdesk",
+      "hasEmail": "mailto:DialysisData@umich.edu"
+    },
+    "publisher": {
+      "@type": "org:Organization",
+      "name": "Centers for Medicare \\u0026 Medicaid Services (CMS)"
+    },
+    "identifier": "23ew-n7w9",
+    "description": "A list of all dialysis facilities registered with Medicare that includes addresses and phone numbers, as well as services and quality of care provided.",
+    "title": "Dialysis Facility - Listing by Facility",
+    "programCode": [
+      "009:000"
+    ],
+    "distribution": [
+      {
+        "@type": "dcat:Distribution",
+        "downloadURL": "https:\\/\\/data.cms.gov\\/provider-data\\/sites\\/default\\/files\\/resources\\/c04d84bc5c641284494bee4f20f17f9c_1766441148\\/DFC_FACILITY.csv",
+        "mediaType": "text\\/csv",
+        "describedBy": "https:\\/\\/data.cms.gov\\/provider-data\\/sites\\/default\\/files\\/data_dictionaries\\/dialysis\\/DF_Data_Dictionary.pdf",
+        "describedByType": "application\\/pdf"
+      }
+    ],
+    "theme": [
+      "Dialysis facilities"
+    ]
+  }
+]

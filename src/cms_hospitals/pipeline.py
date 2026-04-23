@@ -510,7 +510,11 @@ def run_pipeline(config: Config) -> int:
 
 
 def _run_pipeline_locked(config: Config) -> int:
-    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    # Microsecond precision prevents run_id collisions when two invocations
+    # fire within the same second (rapid manual reruns, CI validation loops,
+    # back-to-back test runs). Plan's per-second format only held under the
+    # daily-cron assumption; microseconds make it robust without cost.
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")
     logger = logging.getLogger("cms_hospitals")
     logger.info("run starting", extra={"run_id": run_id})
 

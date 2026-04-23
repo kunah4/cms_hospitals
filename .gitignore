@@ -2,8 +2,11 @@ __pycache__/
 *.py[cod]
 .venv/
 output/
+.staging/
 *.db
 *.db-journal
+*.lock
+*.config.json
 *.partial
 *.egg-info/
 dist/

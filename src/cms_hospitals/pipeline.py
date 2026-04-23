@@ -11,14 +11,17 @@ import csv
 import functools
 import json
 import logging
+import os
 import re
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+import click
 import httpx
 import tenacity
 
@@ -468,6 +471,164 @@ def download_and_transform(
         )
 
 
+# === Orchestrator ===========================================================
+
+
+def _acquire_run_lock(lock_path: Path) -> None:
+    """Create a PID lock; abort if another live process holds it.
+
+    Stale locks (whose PID is no longer running) are silently taken over.
+    """
+    if lock_path.exists():
+        try:
+            existing_pid = int(lock_path.read_text().strip())
+            os.kill(existing_pid, 0)  # signal 0 = existence check only
+        except ProcessLookupError:
+            pass  # stale lock; previous process died
+        except (ValueError, OSError):
+            pass  # corrupt/unreadable; treat as stale
+        else:
+            raise RuntimeError(
+                f"Another run is in progress (PID {existing_pid}). "
+                f"If this is stale, remove {lock_path} manually."
+            )
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(str(os.getpid()))
+
+
+def _release_run_lock(lock_path: Path) -> None:
+    lock_path.unlink(missing_ok=True)
+
+
+def run_pipeline(config: Config) -> int:
+    lock_path = config.state_db.with_suffix(".lock")
+    _acquire_run_lock(lock_path)
+    try:
+        return _run_pipeline_locked(config)
+    finally:
+        _release_run_lock(lock_path)
+
+
+def _run_pipeline_locked(config: Config) -> int:
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    logger = logging.getLogger("cms_hospitals")
+    logger.info("run starting", extra={"run_id": run_id})
+
+    run_output_dir = config.output_dir / datetime.now().strftime("%Y-%m-%d")
+
+    with contextlib.ExitStack() as stack:
+        conn = stack.enter_context(contextlib.closing(connect(config.state_db)))
+        apply_schema(conn)
+        start_run(conn, run_id)
+
+        client = stack.enter_context(make_client(timeout=config.timeout))
+
+        datasets = fetch_datasets(client, theme=config.theme)
+        if config.limit:
+            datasets = datasets[: config.limit]
+
+        known = {} if config.full_refresh else get_known_modified(conn)
+
+        to_process: list[PendingWork] = []
+        counts = {s: 0 for s in DatasetStatus}
+        for ds in datasets:
+            intended_status = decide(ds, known.get(ds.identifier))
+            if intended_status is DatasetStatus.UNCHANGED:
+                counts[intended_status] += 1
+                logger.debug("unchanged", extra={"identifier": ds.identifier})
+            else:
+                to_process.append(
+                    PendingWork(dataset=ds, intended_status=intended_status)
+                )
+
+        if config.dry_run:
+            logger.info(
+                "dry-run summary",
+                extra={
+                    "discovered": len(datasets),
+                    "would_download": len(to_process),
+                    "unchanged": counts[DatasetStatus.UNCHANGED],
+                },
+            )
+            finish_run(
+                conn,
+                run_id,
+                discovered=len(datasets),
+                new=0,
+                modified=0,
+                unchanged=counts[DatasetStatus.UNCHANGED],
+                failed=0,
+                status="success",
+            )
+            return 0
+
+        pool = stack.enter_context(
+            ThreadPoolExecutor(
+                max_workers=config.workers,
+                thread_name_prefix="cms_hospitals",
+            )
+        )
+        futures = {
+            pool.submit(
+                download_and_transform,
+                work.dataset,
+                client,
+                config.staging_dir,
+                run_output_dir,
+            ): work
+            for work in to_process
+        }
+
+        for future in as_completed(futures):
+            work = futures[future]
+            # Belt-and-suspenders: even if a worker raises before its own
+            # try/except (e.g. OOM, interpreter bug), one dataset can't take
+            # down the whole run. Log and move on.
+            try:
+                outcome = future.result()
+            except Exception as exc:
+                logger.exception(
+                    "worker crashed",
+                    extra={"identifier": work.dataset.identifier},
+                )
+                outcome = DownloadOutcome(
+                    identifier=work.dataset.identifier,
+                    output_path=None,
+                    row_count=None,
+                    error=f"worker crashed: {exc!r}",
+                )
+            final_status = (
+                work.intended_status if outcome.succeeded else DatasetStatus.FAILED
+            )
+            counts[final_status] += 1
+            upsert_dataset(conn, work.dataset, outcome, final_status, run_id)
+
+        status = "success" if counts[DatasetStatus.FAILED] == 0 else "partial"
+        finish_run(
+            conn,
+            run_id,
+            discovered=len(datasets),
+            new=counts[DatasetStatus.NEW],
+            modified=counts[DatasetStatus.MODIFIED],
+            unchanged=counts[DatasetStatus.UNCHANGED],
+            failed=counts[DatasetStatus.FAILED],
+            status=status,
+        )
+
+    logger.info(
+        "run complete",
+        extra={
+            "run_id": run_id,
+            "discovered": len(datasets),
+            "new": counts[DatasetStatus.NEW],
+            "modified": counts[DatasetStatus.MODIFIED],
+            "unchanged": counts[DatasetStatus.UNCHANGED],
+            "failed": counts[DatasetStatus.FAILED],
+        },
+    )
+    return 0 if counts[DatasetStatus.FAILED] == 0 else 1
+
+
 # === Logging ================================================================
 
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s %(contextual)s"
@@ -497,3 +658,56 @@ def setup_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level.upper())
+
+
+# === CLI ====================================================================
+
+
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option(
+    "--output-dir",
+    type=click.Path(path_type=Path),
+    help="Where cleaned CSVs are written.",
+)
+@click.option(
+    "--state-db",
+    type=click.Path(path_type=Path),
+    help="Path to SQLite state database.",
+)
+@click.option(
+    "--staging-dir",
+    type=click.Path(path_type=Path),
+    help="Staging directory for in-progress downloads.",
+)
+@click.option(
+    "--workers",
+    type=click.IntRange(1, MAX_WORKERS),
+    help=f"Max worker threads (1-{MAX_WORKERS}). Default 4 for 4GB-RAM safety.",
+)
+@click.option("--timeout", type=float, help="HTTP timeout in seconds.")
+@click.option("--theme", help="Filter theme (default: Hospitals).")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=None,
+    help="Discover and classify but do not download.",
+)
+@click.option(
+    "--full-refresh",
+    is_flag=True,
+    default=None,
+    help="Ignore state; treat all datasets as NEW.",
+)
+@click.option("--limit", type=int, help="Process at most N datasets (for smoke tests).")
+@click.option(
+    "--log-level",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+    help="Logging verbosity.",
+)
+def cli_main(**kwargs: Any) -> None:
+    """Incremental daily ingestion of CMS Hospitals datasets."""
+    cli_overrides = {k: v for k, v in kwargs.items() if v is not None}
+    config = load_config(cli_overrides)
+    setup_logging(config.log_level)
+    exit_code = run_pipeline(config)
+    raise SystemExit(exit_code)

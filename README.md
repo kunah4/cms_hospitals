@@ -11,8 +11,11 @@ Single-file implementation in [`src/cms_hospitals/pipeline.py`](src/cms_hospital
 ```bash
 # requires uv — https://docs.astral.sh/uv/
 uv sync
-uv run python -m cms_hospitals --dry-run   # verify install (no downloads)
+uv run python -m cms_hospitals --dry-run   # sanity: classify without downloading
+uv run python -m cms_hospitals             # real run: pull NEW + MODIFIED datasets
 ```
+
+Sample output: [sample_output/](sample_output/) — two snake-cased CSVs trimmed to 10 rows each.
 
 **Pip fallback:**
 ```bash
@@ -23,16 +26,13 @@ pip install -e .
 python -m cms_hospitals --dry-run
 ```
 
-Sample output: [sample_output/](sample_output/) — two snake-cased CSVs trimmed to 10 rows each.
-
 ---
 
 ## Running
 
 ```bash
-uv run python -m cms_hospitals              # daily run: pull NEW + MODIFIED datasets
-uv run python -m cms_hospitals --dry-run    # preview: classify without downloading
-uv run python -m cms_hospitals --limit 2    # partial: process first 2 datasets
+uv run python -m cms_hospitals --limit N       # partial: process first N datasets
+uv run python -m cms_hospitals --full-refresh  # ignore state; re-download everything
 ```
 
 Exit code is **0** on full success, **1** if any dataset's download/transform FAILED. For scheduled use, invoke `uv run python -m cms_hospitals` from cron / systemd timer / Task Scheduler; the process manager handles log persistence.

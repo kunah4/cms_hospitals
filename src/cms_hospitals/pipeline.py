@@ -9,6 +9,8 @@ from __future__ import annotations
 import contextlib
 import csv
 import functools
+import json
+import logging
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -129,6 +131,117 @@ def decide(dataset: Dataset, known_modified: str | None) -> DatasetStatus:
     if known_modified != dataset.modified:
         return DatasetStatus.MODIFIED
     return DatasetStatus.UNCHANGED
+
+
+# === Config ================================================================
+
+# Deployment defaults — edit if your environment needs different paths.
+DEFAULT_OUTPUT_ROOT = Path("output")
+DEFAULT_STATE_DB = Path(".cms_hospitals_state.db")
+DEFAULT_STAGING_DIR = Path(".staging")
+THEME = "Hospitals"
+MAX_WORKERS = 16
+
+_DEFAULTS: dict[str, Any] = {
+    "output_dir": str(DEFAULT_OUTPUT_ROOT),
+    "state_db": str(DEFAULT_STATE_DB),
+    "staging_dir": str(DEFAULT_STAGING_DIR),
+    "workers": 4,
+    "timeout": 30.0,
+    "theme": THEME,
+    "log_level": "INFO",
+}
+
+# Keys that persist across runs (written to JSON sidecar).
+_PERSISTENT_KEYS = frozenset(_DEFAULTS)
+
+# Per-invocation only (NEVER persisted).
+_PER_RUN_KEYS = frozenset({"dry_run", "full_refresh", "limit"})
+
+
+@dataclass(slots=True)
+class Config:
+    output_dir: Path
+    state_db: Path
+    staging_dir: Path
+    workers: int
+    timeout: float
+    theme: str
+    log_level: str
+    dry_run: bool
+    full_refresh: bool
+    limit: int | None
+
+
+def _sidecar_path(state_db: Path) -> Path:
+    """Sidecar sits next to the state DB: <stem>.config.json"""
+    return state_db.with_suffix(".config.json")
+
+
+def _load_sidecar(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}  # corrupt sidecar — fall back to defaults
+
+
+def _write_sidecar(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # default=str lets json.dumps serialize Path values from CLI overrides
+    path.write_text(
+        json.dumps(data, indent=2, sort_keys=True, default=str),
+        encoding="utf-8",
+    )
+
+
+def load_config(cli_overrides: dict[str, Any]) -> Config:
+    """Resolve configuration from CLI > sidecar > defaults.
+
+    Persistent CLI overrides (e.g. ``--workers``) are saved to a JSON sidecar
+    so the next invocation reuses them without re-specifying. Per-run flags
+    (``--dry-run``, ``--full-refresh``, ``--limit``) are never persisted.
+    """
+    cli = {k: v for k, v in cli_overrides.items() if v is not None}
+
+    # Resolve state_db first since it anchors the sidecar location.
+    state_db = Path(cli.get("state_db", _DEFAULTS["state_db"]))
+    sidecar = _sidecar_path(state_db)
+    persisted = _load_sidecar(sidecar)
+
+    persistent_effective = {
+        **_DEFAULTS,
+        **persisted,
+        **{k: v for k, v in cli.items() if k in _PERSISTENT_KEYS},
+    }
+
+    workers = int(persistent_effective["workers"])
+    if not 1 <= workers <= MAX_WORKERS:
+        raise ValueError(
+            f"workers={workers} out of range [1, {MAX_WORKERS}]. "
+            "Raise MAX_WORKERS deliberately if you need more."
+        )
+
+    # Persist any new CLI overrides that changed persisted values.
+    cli_persistent_updates = {k: v for k, v in cli.items() if k in _PERSISTENT_KEYS}
+    if cli_persistent_updates and cli_persistent_updates != {
+        k: persisted.get(k) for k in cli_persistent_updates
+    }:
+        _write_sidecar(sidecar, persistent_effective)
+
+    return Config(
+        output_dir=Path(persistent_effective["output_dir"]),
+        state_db=Path(persistent_effective["state_db"]),
+        staging_dir=Path(persistent_effective["staging_dir"]),
+        workers=workers,
+        timeout=float(persistent_effective["timeout"]),
+        theme=str(persistent_effective["theme"]),
+        log_level=str(persistent_effective["log_level"]),
+        dry_run=bool(cli.get("dry_run", False)),
+        full_refresh=bool(cli.get("full_refresh", False)),
+        limit=int(cli["limit"]) if cli.get("limit") is not None else None,
+    )
 
 
 # === State (SQLite) =========================================================
@@ -353,3 +466,34 @@ def download_and_transform(
             row_count=None,
             error=str(exc),
         )
+
+
+# === Logging ================================================================
+
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s %(contextual)s"
+
+_STANDARD_LOGRECORD_ATTRS = set(
+    logging.LogRecord("x", logging.INFO, "x", 0, "x", None, None).__dict__.keys()
+) | {"message", "asctime"}
+
+
+class _ContextFilter(logging.Filter):
+    """Ensure every record has a 'contextual' field for the formatter."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        extras = {
+            k: v
+            for k, v in record.__dict__.items()
+            if k not in _STANDARD_LOGRECORD_ATTRS and not k.startswith("_")
+        }
+        record.contextual = json.dumps(extras, default=str) if extras else ""
+        return True
+
+
+def setup_logging(level: str = "INFO") -> None:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    handler.addFilter(_ContextFilter())
+    root = logging.getLogger()
+    root.handlers = [handler]
+    root.setLevel(level.upper())

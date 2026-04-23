@@ -10,7 +10,9 @@ import contextlib
 import csv
 import functools
 import re
+import sqlite3
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -116,6 +118,156 @@ def rewrite_csv(src: Path, dst: Path) -> int:
             writer.writerow({header_map[k]: v for k, v in row.items()})
             row_count += 1
     return row_count
+
+
+# === Classify (pure) ========================================================
+
+
+def decide(dataset: Dataset, known_modified: str | None) -> DatasetStatus:
+    if known_modified is None:
+        return DatasetStatus.NEW
+    if known_modified != dataset.modified:
+        return DatasetStatus.MODIFIED
+    return DatasetStatus.UNCHANGED
+
+
+# === State (SQLite) =========================================================
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS dataset_runs (
+    identifier          TEXT PRIMARY KEY,
+    title               TEXT NOT NULL,
+    download_url        TEXT NOT NULL,
+    source_modified_at  TEXT NOT NULL,
+    downloaded_at       TEXT NOT NULL,
+    output_path         TEXT NOT NULL,
+    row_count           INTEGER,
+    last_run_id         TEXT NOT NULL,
+    last_status         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    run_id              TEXT PRIMARY KEY,
+    started_at          TEXT NOT NULL,
+    finished_at         TEXT,
+    datasets_discovered INTEGER,
+    datasets_new        INTEGER,
+    datasets_modified   INTEGER,
+    datasets_unchanged  INTEGER,
+    datasets_failed     INTEGER,
+    status              TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dataset_runs_last_run
+    ON dataset_runs(last_run_id);
+"""
+
+
+def connect(db_path: Path) -> sqlite3.Connection:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # isolation_level=None puts sqlite3 in autocommit mode — each UPSERT is
+    # atomic on its own. Single-writer orchestrator means no need for
+    # explicit BEGIN/COMMIT.
+    conn = sqlite3.connect(db_path, isolation_level=None)
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def apply_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(_SCHEMA)
+
+
+def get_known_modified(conn: sqlite3.Connection) -> dict[str, str]:
+    """Return last-known-good modified date per dataset.
+
+    Filters to successful runs only. A dataset whose last attempt FAILED is
+    treated as unknown so the next run retries it rather than skipping it as
+    UNCHANGED. Without this filter, a failed UPSERT (which still records the
+    CMS-reported modified date) would cause the classifier to think the
+    dataset is up to date and skip it forever.
+    """
+    cur = conn.execute(
+        "SELECT identifier, source_modified_at FROM dataset_runs "
+        "WHERE last_status != 'failed'"
+    )
+    return dict(cur.fetchall())
+
+
+def upsert_dataset(
+    conn: sqlite3.Connection,
+    dataset: Dataset,
+    outcome: DownloadOutcome,
+    status: DatasetStatus,
+    run_id: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO dataset_runs
+            (identifier, title, download_url, source_modified_at,
+             downloaded_at, output_path, row_count, last_run_id, last_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(identifier) DO UPDATE SET
+            title=excluded.title,
+            download_url=excluded.download_url,
+            source_modified_at=excluded.source_modified_at,
+            downloaded_at=excluded.downloaded_at,
+            output_path=excluded.output_path,
+            row_count=excluded.row_count,
+            last_run_id=excluded.last_run_id,
+            last_status=excluded.last_status
+        """,
+        (
+            dataset.identifier,
+            dataset.title,
+            dataset.download_url,
+            dataset.modified,
+            datetime.now(UTC).isoformat(),
+            str(outcome.output_path) if outcome.output_path else "",
+            outcome.row_count,
+            run_id,
+            status.value,
+        ),
+    )
+
+
+def start_run(conn: sqlite3.Connection, run_id: str) -> None:
+    conn.execute(
+        "INSERT INTO pipeline_runs (run_id, started_at, status) "
+        "VALUES (?, ?, 'running')",
+        (run_id, datetime.now(UTC).isoformat()),
+    )
+
+
+def finish_run(
+    conn: sqlite3.Connection,
+    run_id: str,
+    *,
+    discovered: int,
+    new: int,
+    modified: int,
+    unchanged: int,
+    failed: int,
+    status: str,
+) -> None:
+    conn.execute(
+        """
+        UPDATE pipeline_runs SET
+            finished_at=?, datasets_discovered=?, datasets_new=?,
+            datasets_modified=?, datasets_unchanged=?, datasets_failed=?,
+            status=?
+        WHERE run_id=?
+        """,
+        (
+            datetime.now(UTC).isoformat(),
+            discovered,
+            new,
+            modified,
+            unchanged,
+            failed,
+            status,
+            run_id,
+        ),
+    )
 
 
 # === API Client (httpx + tenacity) ==========================================

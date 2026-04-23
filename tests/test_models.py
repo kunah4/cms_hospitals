@@ -44,3 +44,26 @@ def test_dataset_status_is_string_comparable():
     assert DatasetStatus.NEW == "new"
     assert DatasetStatus.MODIFIED.value == "modified"
     assert DatasetStatus("unchanged") is DatasetStatus.UNCHANGED
+
+
+_BASE = {"identifier": "x", "title": "t", "modified": "2026-01-01"}
+
+
+@pytest.mark.parametrize(
+    "bad_record",
+    [
+        pytest.param({}, id="empty_dict"),
+        pytest.param(_BASE, id="no_distribution"),
+        pytest.param(
+            {**_BASE, "distribution": []},
+            id="empty_distribution_list",
+        ),
+        pytest.param(
+            {**_BASE, "distribution": [{"mediaType": "text/csv"}]},
+            id="distribution_missing_download_url",
+        ),
+    ],
+)
+def test_dataset_from_dict_raises_value_error_on_malformed_record(bad_record):
+    with pytest.raises(ValueError, match="malformed CMS record"):
+        Dataset.from_dict(bad_record)

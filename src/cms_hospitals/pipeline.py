@@ -45,14 +45,17 @@ class Dataset:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Dataset:
-        dist = raw["distribution"][0]  # verified: 73/73 Hospitals have exactly 1
-        return cls(
-            identifier=raw["identifier"],
-            title=raw["title"],
-            modified=raw["modified"],
-            download_url=dist["downloadURL"],
-            media_type=dist["mediaType"],
-        )
+        try:
+            dist = raw["distribution"][0]  # verified: 73/73 Hospitals have exactly 1
+            return cls(
+                identifier=raw["identifier"],
+                title=raw["title"],
+                modified=raw["modified"],
+                download_url=dist["downloadURL"],
+                media_type=dist["mediaType"],
+            )
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError(f"malformed CMS record: {exc!r}") from exc
 
 
 @dataclass(slots=True)
@@ -424,7 +427,32 @@ def fetch_datasets(
     url: str = _METASTORE_URL,
 ) -> list[Dataset]:
     raw_records = _get_metastore(client, url)
-    return [Dataset.from_dict(r) for r in raw_records if theme in r.get("theme", [])]
+    if not isinstance(raw_records, list):
+        raise ValueError(
+            f"metastore returned {type(raw_records).__name__}, expected list"
+        )
+    logger = logging.getLogger("cms_hospitals")
+    datasets: list[Dataset] = []
+    for raw in raw_records:
+        if not isinstance(raw, dict):
+            logger.warning(
+                "skipping non-dict record",
+                extra={"record_type": type(raw).__name__},
+            )
+            continue
+        if theme not in raw.get("theme", []):
+            continue
+        try:
+            datasets.append(Dataset.from_dict(raw))
+        except ValueError as exc:
+            logger.warning(
+                "skipping malformed record",
+                extra={
+                    "identifier": raw.get("identifier", "?"),
+                    "error": str(exc),
+                },
+            )
+    return datasets
 
 
 # === Worker (download + transform) ==========================================
@@ -518,7 +546,7 @@ def _run_pipeline_locked(config: Config) -> int:
     logger = logging.getLogger("cms_hospitals")
     logger.info("run starting", extra={"run_id": run_id})
 
-    run_output_dir = config.output_dir / datetime.now().strftime("%Y-%m-%d")
+    run_output_dir = config.output_dir / datetime.now(UTC).strftime("%Y-%m-%d")
 
     with contextlib.ExitStack() as stack:
         conn = stack.enter_context(contextlib.closing(connect(config.state_db)))
